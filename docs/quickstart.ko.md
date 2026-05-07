@@ -121,6 +121,16 @@ job.send("학습 완료!")
 - **[개발자 가이드](develop.md)**: Slack 봇 및 명령 서버 설정
 - **[GitHub 저장소](https://github.com/kangmg/miraeping)**: 소스 코드 및 이슈
 
+## Slack 명령어 사용하기
+
+!!! info "`/qq`, `/qstat`, `/gpu` 같은 Slack 슬래시 명령어를 사용하고 싶으신가요?"
+    클러스터 상태 확인을 위한 Slack 명령어를 사용하려면:
+    
+    1. 봇을 Slack 워크스페이스에 추가
+    2. 관리자에게 **Slack ID** (`U0XXXXXXXXX`)와 **Mirae 서버 아이디**를 알려주세요
+    
+    **[→ Slack 명령어에 대해 더 알아보기](usage.md#2-slack-slash-commands)**
+
 ## 문제 해결
 
 !!! warning "자격 증명을 찾을 수 없나요?"

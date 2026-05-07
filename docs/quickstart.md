@@ -120,6 +120,16 @@ job.send("Training finished!")
 - **[Developer Guide](develop.md)**: Set up Slack bot and command server
 - **[GitHub Repository](https://github.com/kangmg/miraeping)**: Source code and issues
 
+## Using Slack Commands
+
+!!! info "Want to use Slack slash commands like `/qq`, `/qstat`, `/gpu`?"
+    To use Slack commands for cluster status checks:
+    
+    1. Add the bot to your Slack workspace
+    2. Share your **Slack ID** (`U0XXXXXXXXX`) and **Mirae server username** with the admin
+    
+    **[→ Learn more about Slack commands](usage.md#feature-2-slack-slash-commands)**
+
 ## Troubleshooting
 
 !!! warning "Credentials not found?"
