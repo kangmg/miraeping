@@ -32,10 +32,18 @@ git clone https://github.com/kangmg/miraeping
 cd miraeping && bash setup.sh && cd ..
 ```
 
-During setup, you'll be prompted to enter:
+You'll see a prompt like this:
 
-- **Slack User ID**: `U0XXXXXXXXX` (your member ID)
-- **Bot Token**: `xoxb-YOUR-BOT-TOKEN-HERE` (starts with `xoxb-`)
+```
+Enter Slack credentials (or pre-set SLACK_USER_ID / SLACK_BOT_TOKEN env vars).
+1) Slack User ID (hidden input):
+2) Slack Bot Token (hidden input):
+```
+
+Enter the following:
+
+1. **Slack User ID**: Your member ID (e.g., `U012AB3CD4E`) - find it in your Slack profile
+2. **Bot Token**: The shared bot token from your admin (starts with `xoxb-...`)
 
 After setup completes, reload your shell configuration:
 

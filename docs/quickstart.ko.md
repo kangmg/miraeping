@@ -33,10 +33,18 @@ git clone https://github.com/kangmg/miraeping
 cd miraeping && bash setup.sh && cd ..
 ```
 
-설정 중에 다음을 입력하라는 메시지가 표시됩니다:
+다음과 같은 프롬프트가 표시됩니다:
 
-- **Slack 사용자 ID**: `U0XXXXXXXXX` (본인의 멤버 ID)
-- **봇 토큰**: `xoxb-YOUR-BOT-TOKEN-HERE` (`xoxb-`로 시작)
+```
+Enter Slack credentials (or pre-set SLACK_USER_ID / SLACK_BOT_TOKEN env vars).
+1) Slack User ID (hidden input):
+2) Slack Bot Token (hidden input):
+```
+
+다음을 입력하세요:
+
+1. **Slack User ID**: 본인의 멤버 ID (예: `U012AB3CD4E`) - Slack 프로필에서 확인
+2. **Bot Token**: 관리자에게 받은 공유 봇 토큰 (`xoxb-...`로 시작)
 
 설정이 완료되면 셸 설정을 다시 로드하세요:
 
