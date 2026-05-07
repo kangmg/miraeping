@@ -95,7 +95,7 @@ Slack 명령어 서버를 실행할 conda 또는 uv 환경 안에서 아래 명�
 
 ```bash
 # PyPI에서 uv 환경에 설치:
-uv venv -p 3.11 .venv
+uv venv -p 3.7 .venv
 uv pip install "miraeping[server]"
 
 # 소스 체크아웃에서 설치:

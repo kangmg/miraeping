@@ -4,7 +4,7 @@ Get started with miraeping in minutes! This guide covers the essential setup for
 
 ## Prerequisites
 
-- Python 3.11 or higher
+- Python 3.7 or higher
 - A Slack workspace with bot permissions
 - Your Slack User ID and Bot Token ([Setup Guide](develop.md))
 
@@ -14,13 +14,13 @@ Choose your preferred Python environment manager:
 
 === "uv"
     ```bash
-    uv venv -p 3.11
+    uv venv -p 3.7
     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
     ```
 
 === "conda"
     ```bash
-    conda create -n miraeping python=3.11
+    conda create -n miraeping python=3.7
     conda activate miraeping
     ```
 

@@ -7,7 +7,7 @@ name = "miraeping"
 dynamic = ["version"]
 description = "Slack DM notifications for SGE jobs and Python computations"
 readme = { text = "Slack DM notifications for SGE jobs and Python computations on SGE-based clusters.", content-type = "text/plain" }
-requires-python = ">=3.8"
+requires-python = ">=3.7"
 dependencies = []
 
 [project.optional-dependencies]

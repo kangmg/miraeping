@@ -45,7 +45,7 @@ SGE 잡 스크립트나 Python 코드에서 Slack DM 알림을 보내고 싶을 
 | 워크플로우 | 설치 | 자격 증명 |
 |------------|------|-----------|
 | SGE 스크립트용 Bash 헬퍼 | `git clone` + `bash setup.sh` | 관리자에게 받은 `SLACK_BOT_TOKEN` + 본인 Slack 멤버 ID (`SLACK_USER_ID`) |
-| Python API | conda에서는 `pip install miraeping`, uv에서는 `uv venv -p 3.11` + `uv pip install miraeping` | 동일한 `SLACK_BOT_TOKEN` + `SLACK_USER_ID`; `~/.miraeping/credentials` 또는 환경변수에서 읽음 |
+| Python API | conda에서는 `pip install miraeping`, uv에서는 `uv venv -p 3.7` + `uv pip install miraeping` | 동일한 `SLACK_BOT_TOKEN` + `SLACK_USER_ID`; `~/.miraeping/credentials` 또는 환경변수에서 읽음 |
 
 **1) 관리자에게 `SLACK_BOT_TOKEN` 받기**
 
@@ -66,12 +66,12 @@ source ~/.bashrc
 
 ```bash
 # conda
-conda create -n miraeping python=3.11 -y
+conda create -n miraeping python=3.7 -y
 conda activate miraeping
 pip install miraeping
 
 # uv
-uv venv -p 3.11 .venv
+uv venv -p 3.7 .venv
 uv pip install miraeping
 ```
 

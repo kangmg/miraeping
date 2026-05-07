@@ -4,7 +4,7 @@
 
 ## 사전 요구사항
 
-- Python 3.11 이상
+- Python 3.7 이상
 - 봇 권한이 있는 Slack 워크스페이스
 - Slack 사용자 ID 및 봇 토큰 ([설정 가이드](develop.md))
 
@@ -14,13 +14,13 @@
 
 === "uv"
     ```bash
-    uv venv -p 3.11
+    uv venv -p 3.7
     source .venv/bin/activate  # Windows: .venv\Scripts\activate
     ```
 
 === "conda"
     ```bash
-    conda create -n miraeping python=3.11
+    conda create -n miraeping python=3.7
     conda activate miraeping
     ```
 

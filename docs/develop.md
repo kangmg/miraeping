@@ -95,7 +95,7 @@ Run these commands inside the conda or uv environment that will host the Slack c
 
 ```bash
 # From PyPI into a uv environment:
-uv venv -p 3.11 .venv
+uv venv -p 3.7 .venv
 uv pip install "miraeping[server]"
 
 # From a source checkout:

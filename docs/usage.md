@@ -45,7 +45,7 @@ Choose one setup path based on your workflow:
 | Workflow | Install | Credentials |
 |----------|---------|-------------|
 | Bash helper for SGE scripts | `git clone` + `bash setup.sh` | `SLACK_BOT_TOKEN` from the admin + your own Slack member ID (`SLACK_USER_ID`) |
-| Python API | `pip install miraeping` in conda, or `uv venv -p 3.11` + `uv pip install miraeping` in uv | Same `SLACK_BOT_TOKEN` + `SLACK_USER_ID`, read from `~/.miraeping/credentials` or environment variables |
+| Python API | `pip install miraeping` in conda, or `uv venv -p 3.7` + `uv pip install miraeping` in uv | Same `SLACK_BOT_TOKEN` + `SLACK_USER_ID`, read from `~/.miraeping/credentials` or environment variables |
 
 **1) Get `SLACK_BOT_TOKEN` from the admin**
 
@@ -66,12 +66,12 @@ source ~/.bashrc
 
 ```bash
 # conda
-conda create -n miraeping python=3.11 -y
+conda create -n miraeping python=3.7 -y
 conda activate miraeping
 pip install miraeping
 
 # uv
-uv venv -p 3.11 .venv
+uv venv -p 3.7 .venv
 uv pip install miraeping
 ```
 
