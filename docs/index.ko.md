@@ -4,9 +4,9 @@
 
 ---
 
-## <i class="fa-solid fa-fire"></i> 빠른 시작
+## :fire: 빠른 시작
 
-**몇 분 안에 시작하세요!** → [빠른 시작 가이드](quickstart.md)
+**몇 분 안에 시작하세요!** → [:fire: 빠른 시작 가이드](quickstart.md)
 
 ---
 

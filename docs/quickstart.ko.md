@@ -1,4 +1,4 @@
-# <i class="fa-solid fa-fire"></i> 빠른 시작
+# :fire: 빠른 시작
 
 몇 분 안에 miraeping을 시작하세요! 이 가이드는 Bash와 Python 사용을 위한 필수 설정을 다룹니다.
 

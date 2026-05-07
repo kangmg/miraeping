@@ -4,9 +4,9 @@ Slack DM notifications for SGE jobs and Python computations, plus Slack-based cl
 
 ---
 
-## <i class="fa-solid fa-fire"></i> Quick Start
+## :fire: Quick Start
 
-**Get started in minutes!** → [Quick Start Guide](quickstart.md)
+**Get started in minutes!** → [:fire: Quick Start Guide](quickstart.md)
 
 ---
 
