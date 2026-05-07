@@ -1,0 +1,17 @@
+include README.md
+include pyproject.toml
+
+recursive-include miraeping *.py
+
+prune tests
+prune docs
+prune site
+prune .github
+
+exclude mkdocs.yml
+exclude setup.sh
+exclude miraeping.sh
+exclude slack_commands_server.py
+exclude uv.lock
+
+global-exclude __pycache__ *.py[cod] .DS_Store

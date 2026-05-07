@@ -1,0 +1,17 @@
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Packaging artifacts
+*.egg-info/
+build/
+dist/
+
+# Test/virtualenv tooling
+.pytest_cache/
+.venv/
+.uv-cache/
+
+# MkDocs dev server logs
+.docs_serve.*.log

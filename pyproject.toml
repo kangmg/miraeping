@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miraeping"
+dynamic = ["version"]
+description = "Slack DM notifications for SGE jobs and Python computations"
+readme = { text = "Slack DM notifications for SGE jobs and Python computations on SGE-based clusters.", content-type = "text/plain" }
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+server = ["slack-bolt>=1.14"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+miraeping-slack-serve = "miraeping.slack_server:main"
+miraeping-slack-start = "miraeping.slack_server:start_cli"
+miraeping-slack-stop = "miraeping.slack_server:stop_cli"
+miraeping-slack-status = "miraeping.slack_server:status_cli"
+miraeping-slack-restart = "miraeping.slack_server:restart_cli"
+
+[project.urls]
+Repository = "https://github.com/kangmg/miraeping"
+
+[tool.setuptools]
+packages = ["miraeping"]
+
+[tool.setuptools.dynamic]
+version = {attr = "miraeping._version.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,62 @@
+site_name: miraeping
+site_description: Slack DM notifications for SGE jobs and Python computations
+site_url: https://kangmg.github.io/miraeping
+repo_url: https://github.com/kangmg/miraeping
+repo_name: kangmg/miraeping
+
+theme:
+  name: material
+  logo: assets/miraeping.png
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.top
+    - search.highlight
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: ko
+          name: 한국어
+          build: true
+          nav_translations:
+            Home: 홈
+            User Guide: 사용자 가이드
+            Developer Guide: 개발자 가이드
+
+
+nav:
+  - Home: index.md
+  - User Guide: usage.md
+  - Developer Guide: develop.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+
+extra_css:
+  - stylesheets/extra.css
