@@ -40,12 +40,14 @@ plugins:
           build: true
           nav_translations:
             Home: 홈
+            Quick Start: 빠른 시작
             User Guide: 사용자 가이드
             Developer Guide: 개발자 가이드
 
 
 nav:
   - Home: index.md
+  - Quick Start: quickstart.md
   - User Guide: usage.md
   - Developer Guide: develop.md
 
