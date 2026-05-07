@@ -15,7 +15,6 @@
 === "uv"
     ```bash
     uv venv -p 3.7
-    source .venv/bin/activate  # Windows: .venv\Scripts\activate
     ```
 
 === "conda"
