@@ -6,11 +6,12 @@ Slack DM notifications for SGE jobs and Python computations on SGE-based cluster
 
 ## What this project provides
 
-`miraeping` contains two separate workflows:
+`miraeping` contains three separate workflows:
 
 | Workflow | What it is | Where to start |
 |----------|------------|----------------|
 | **Job notifications** | User-side Slack DM alerts from SGE job scripts or Python code | [User Guide](docs/usage.md) |
+| **GPU availability watcher** | Standalone `gpu-watch` command: wait for a free GPU on the current node and send a Slack DM | [GPU watcher guide](docs/usage.md#feature-3---gpu-availability-watcher) |
 | **Slack cluster commands** | Optional slash commands such as `/qq`, `/qstat`, `/qwd`, `/gpu`, `/nvidia-smi`. A lab/admin server operator must run the command server first | [User Guide](docs/usage.md) for usage, [Developer Guide](docs/develop.md) for setup |
 
 ## Notify Installation
@@ -46,6 +47,32 @@ pip install miraeping
 uv venv -p 3.11 .venv
 uv pip install miraeping
 ```
+
+## GPU Availability Watcher
+
+On a Linux GPU node with `SLACK_BOT_TOKEN` and `SLACK_USER_ID` already exported:
+
+```bash
+install -Dm755 bin/gpu-watch ~/.local/bin/gpu-watch
+gpu-watch --help
+gpu-watch
+gpu-watch status
+gpu-watch stop
+```
+
+Ensure `~/.local/bin` is on `PATH`, or run `~/.local/bin/gpu-watch` directly.
+This standalone Bash executable does not require `setup.sh`, `source`, Python,
+or the Slack command server. It requires Bash 4+, `nvidia-smi`, `curl`, GNU
+coreutils (`timeout`, `nohup`), and `flock` on Linux.
+
+`gpu-watch` starts a `nohup` background process and returns after startup checks.
+It checks immediately, then every 10 minutes while busy. When any GPU uses at
+most 100 MiB of VRAM, it checks that same GPU again after 1 minute, sends one
+Slack DM, and exits. After 24 hours without a successful availability alert,
+it attempts a timeout DM and exits. The final timeout DM has a separate
+10-second network timeout (plus at most 1 second to force-stop a stuck call).
+All messages and help are in English. See the [GPU watcher guide](docs/usage.md#feature-3---gpu-availability-watcher)
+for options and operational details.
 
 ## Slack Command Server (Admin)
 

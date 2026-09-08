@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# Standalone Linux GPU watcher. Credentials come only from the environment.
+set -uo pipefail
+umask 077
+
+usage() {
+    cat <<'EOF'
+Usage: gpu-watch [options]
+       gpu-watch status|stop
+
+Start a background watcher on this node; no source, nohup, or & is needed.
+Send one Slack DM when the same GPU passes two VRAM checks, then exit.
+
+Options:
+  --gpu INDEX|UUID   Watch one GPU (default: any GPU on this node)
+  --threshold MIB    Maximum used VRAM considered available (default: 100)
+  --interval TIME    Poll interval (default: 10m)
+  --confirm TIME     Delay before checking the same GPU again (default: 1m)
+  --max-wait TIME    Monitoring time limit (default: 24h)
+  --foreground       Run in the foreground, for debugging or a supervisor
+  -h, --help         Show this help
+
+TIME is a positive integer in seconds, or with an s, m, h, or d suffix.
+Required exported variables: SLACK_BOT_TOKEN and SLACK_USER_ID.
+On timeout, attempt a final Slack DM for up to 10 seconds, then exit.
+State and logs: ~/.miraeping/gpu-watch/<hostname>/
+
+Examples:
+  gpu-watch
+  gpu-watch --gpu 0 --threshold 100 --max-wait 12h
+  gpu-watch --interval 10m --confirm 1m
+  gpu-watch status
+  gpu-watch stop
+EOF
+}
+
+die() { printf 'gpu-watch: %s\n' "$*" >&2; exit 1; }
+duration() {
+    local value="$1" number factor=1
+    [[ "$value" =~ ^([0-9]{1,7})([smhd]?)$ ]] || return 1
+    number=$((10#${BASH_REMATCH[1]}))
+    case "${BASH_REMATCH[2]}" in m) factor=60 ;; h) factor=3600 ;; d) factor=86400 ;; esac
+    (( number > 0 && number * factor <= 31536000 )) || return 1
+    printf '%s' "$((number * factor))"
+}
+
+mode=start
+gpu=''
+threshold=100
+interval=600
+confirm=60
+max_wait=86400
+worker=0
+original_args=("$@")
+while (( $# )); do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        status|stop) (( ${#original_args[@]} == 1 )) || die "'$1' does not accept options."; mode="$1"; shift ;;
+        --foreground) [[ "$mode" == start ]] || die 'Choose only one execution mode.'; mode=foreground; shift ;;
+        --worker) [[ "$mode" == start ]] || die 'Choose only one execution mode.'; worker=1; mode=foreground; shift ;;
+        --gpu|--threshold|--interval|--confirm|--max-wait)
+            (( $# >= 2 )) || die "Missing value for $1."
+            option="$1"; value="$2"; shift 2
+            case "$option" in
+                --gpu) [[ "$value" =~ ^[0-9]+$ || "$value" =~ ^GPU-[A-Za-z0-9-]+$ ]] || die 'GPU must be an index or a GPU UUID.'; gpu="$value" ;;
+                --threshold) [[ "$value" =~ ^[0-9]{1,7}$ ]] || die 'Threshold must be a nonnegative integer in MiB.'; threshold=$((10#$value)) ;;
+                *) seconds="$(duration "$value")" || die "Invalid duration: $value (use a positive integer, optionally followed by s, m, h, or d; maximum 365d)."
+                   case "$option" in --interval) interval="$seconds" ;; --confirm) confirm="$seconds" ;; --max-wait) max_wait="$seconds" ;; esac ;;
+            esac ;;
+        *) die "Unknown argument: $1 (see --help)." ;;
+    esac
+done
+
+(( BASH_VERSINFO[0] >= 4 )) || die 'Bash 4 or newer is required.'
+[[ -d /proc/self ]] || die 'Linux /proc is required.'
+node="$(hostname)" || die 'Cannot determine hostname.'
+[[ "$node" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'Unsupported hostname.'
+state_dir="${HOME:?HOME is required}/.miraeping/gpu-watch/${node}"
+mkdir -p "$state_dir" || die 'Cannot create state directory.'
+chmod 700 "$state_dir" || die 'Cannot secure state directory.'
+pid_file="$state_dir/monitor.pid"
+result_file="$state_dir/status"
+log_file="$state_dir/monitor.log"
+boot_id="$(< /proc/sys/kernel/random/boot_id)"
+
+# Check the process start time and boot ID, not merely a potentially reused PID.
+process_start() {
+    local line
+    [[ -r "/proc/$1/stat" ]] || return 1
+    IFS= read -r line < "/proc/$1/stat" || return 1
+    line="${line##*) }"
+    local fields
+    read -r -a fields <<< "$line"
+    [[ "${fields[0]:-Z}" != Z && "${fields[19]:-}" =~ ^[0-9]+$ ]] || return 1
+    printf '%s' "${fields[19]}"
+}
+running() {
+    local saved_start saved_boot actual
+    [[ -r "$pid_file" ]] || return 1
+    read -r monitor_pid saved_start saved_boot < "$pid_file" || return 1
+    [[ "$monitor_pid" =~ ^[0-9]+$ && "$monitor_pid" -gt 1 && "$saved_boot" == "$boot_id" ]] || return 1
+    actual="$(process_start "$monitor_pid")" || return 1
+    [[ "$actual" == "$saved_start" ]] && kill -0 "$monitor_pid" 2>/dev/null
+}
+log() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
+set_status() {
+    printf '%s\n' "$*" > "$result_file.$$.tmp"
+    mv -f "$result_file.$$.tmp" "$result_file"
+}
+
+if [[ "$mode" == status ]]; then
+    if running; then
+        printf 'Running on %s (PID %s).\n' "$node" "$monitor_pid"
+    else
+        printf 'Not running on %s.\n' "$node"
+    fi
+    [[ ! -f "$result_file" ]] || cat "$result_file"
+    printf 'Log: %s\n' "$log_file"
+    exit 0
+fi
+if [[ "$mode" == stop ]]; then
+    if ! running; then printf 'No watcher is running on %s.\n' "$node"; exit 0; fi
+    target_pid="$monitor_pid"
+    kill -TERM "$target_pid" 2>/dev/null || die 'Could not stop the watcher.'
+    for ((attempt=0; attempt<50; attempt++)); do
+        if ! running || [[ "$monitor_pid" != "$target_pid" ]]; then
+            printf 'Stopped watcher on %s.\n' "$node"; exit 0
+        fi
+        sleep 0.1
+    done
+    die 'Stop requested, but the watcher has not exited yet. Check status and the log.'
+fi
+
+for dependency in nvidia-smi curl timeout flock nohup; do
+    command -v "$dependency" >/dev/null 2>&1 || die "Required command not found: $dependency"
+done
+[[ "${SLACK_BOT_TOKEN:-}" =~ ^xoxb-[A-Za-z0-9-]+$ ]] || die 'Export a valid SLACK_BOT_TOKEN (xoxb-...) before starting.'
+[[ "${SLACK_USER_ID:-}" =~ ^[UW][A-Z0-9]+$ ]] || die 'Export a valid SLACK_USER_ID before starting.'
+
+if (( worker )); then
+    # The launcher passes its locked descriptor to this fresh Bash process.
+    [[ -e /proc/self/fd/9 ]] && flock -n 9 || die 'Internal worker requires the launcher lock.'
+else
+    exec 9> "$state_dir/monitor.lock"
+    if ! flock -n 9; then
+        if running; then printf 'Already watching on %s (PID %s).\n' "$node" "$monitor_pid"
+        else printf 'A watcher is starting or stopping on %s.\n' "$node"; fi
+        exit 0
+    fi
+fi
+
+active_child=''
+owns_pid=0
+output_file="$state_dir/output.$$"
+error_file="$state_dir/error.$$"
+cleanup() {
+    if [[ -n "$active_child" ]]; then
+        kill -TERM "$active_child" 2>/dev/null || true
+        wait "$active_child" 2>/dev/null || true
+    fi
+    rm -f "$output_file" "$error_file" "$result_file.$$.tmp" "$pid_file.$$.tmp"
+    (( ! owns_pid )) || rm -f "$pid_file"
+}
+interrupted() {
+    set_status "Stopped on $node at $(date -Is)."
+    log 'Monitoring stopped.'
+    exit 0
+}
+trap cleanup EXIT
+trap interrupted TERM INT
+
+# External calls are interruptible and bounded. Children do not retain the lock.
+run_bounded() {
+    local limit="$1" rc=0
+    shift
+    timeout --kill-after=1 "$limit" "$@" <&0 > "$output_file" 2> "$error_file" 9>&- &
+    active_child=$!
+    wait "$active_child" || rc=$?
+    active_child=''
+    response="$(< "$output_file")"
+    return "$rc"
+}
+query_gpus() {
+    run_bounded "$1" nvidia-smi --query-gpu=uuid,index,memory.used,memory.total --format=csv,noheader,nounits || return 1
+    [[ -n "$response" ]] || return 1
+    snapshot="$response"
+}
+slack_call() {
+    local limit="$1" endpoint="$2"
+    shift 2
+    # Feed the token through stdin, keeping it out of command-line arguments.
+    run_bounded "$limit" curl --silent --show-error --fail --connect-timeout 5 --max-time "$limit" \
+        --config - --request POST "$@" "https://slack.com/api/$endpoint" \
+        <<< "header = \"Authorization: Bearer ${SLACK_BOT_TOKEN}\"" || return 1
+    [[ "$response" =~ \"ok\"[[:space:]]*:[[:space:]]*true ]]
+}
+
+if (( ! worker )); then
+    query_gpus 10 || die 'Cannot query GPU memory with nvidia-smi.'
+    matched=0
+    while IFS=, read -r uuid index used total extra; do
+        uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
+        used="${used//[[:space:]]/}"; total="${total//[[:space:]]/}"
+        if [[ -z "$gpu" || "$gpu" == "$uuid" || "$gpu" == "$index" ]]; then
+            [[ "$uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$index" =~ ^[0-9]+$ && "$used" =~ ^[0-9]{1,9}$ && "$total" =~ ^[0-9]{1,9}$ ]] || die 'GPU VRAM data is unavailable or unsupported.'
+            (( 10#$total > 0 )) || die 'GPU total VRAM must be greater than zero.'
+            matched=1
+        fi
+    done <<< "$snapshot"
+    (( matched )) || die "GPU not found: $gpu"
+    slack_call 10 conversations.open --data-urlencode "users=$SLACK_USER_ID" || die 'Cannot open Slack DM. Check credentials, network access, and Slack permissions.'
+    GPU_WATCH_CHANNEL="$(printf '%s' "$response" | sed -n 's/.*"channel"[[:space:]]*:[[:space:]]*{[^}]*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    [[ "$GPU_WATCH_CHANNEL" =~ ^D[A-Z0-9]+$ ]] || die 'Slack did not return a DM channel ID.'
+    export GPU_WATCH_CHANNEL
+fi
+
+if [[ "$mode" == start ]]; then
+    script="$(readlink -f "${BASH_SOURCE[0]}")" || die 'Cannot resolve executable path.'
+    nohup "$BASH" "$script" "${original_args[@]}" --worker </dev/null >> "$log_file" 2>&1 &
+    child=$!
+    # Confirm initialization rather than reporting success based only on $!.
+    for ((attempt=0; attempt<50; attempt++)); do
+        if running && [[ "$monitor_pid" == "$child" ]]; then
+            printf 'Started GPU watcher on %s (PID %s).\n' "$node" "$child"
+            printf 'Poll: %ss; confirmation: %ss; maximum wait: %ss; VRAM threshold: %s MiB.\n' "$interval" "$confirm" "$max_wait" "$threshold"
+            printf 'Log: %s\n' "$log_file"
+            exit 0
+        fi
+        kill -0 "$child" 2>/dev/null || die "Watcher failed to start. See $log_file"
+        sleep 0.1
+    done
+    kill -TERM "$child" 2>/dev/null || true
+    die "Watcher did not initialize. See $log_file"
+fi
+
+[[ "${GPU_WATCH_CHANNEL:-}" =~ ^D[A-Z0-9]+$ ]] || die 'Missing internal Slack channel.'
+deadline=$((SECONDS + max_wait))
+end_at="$(date -d "+${max_wait} seconds" -Is)"
+set_status "Watching ${gpu:-any GPU} on $node; used VRAM <= $threshold MiB; deadline: $end_at."
+printf '%s %s %s\n' "$$" "$(process_start "$$")" "$boot_id" > "$pid_file.$$.tmp"
+mv -f "$pid_file.$$.tmp" "$pid_file"
+owns_pid=1
+log "Monitoring started: GPU=${gpu:-any}, threshold=${threshold} MiB, interval=${interval}s, confirm=${confirm}s, max-wait=${max_wait}s."
+
+pause() {
+    local delay="$1" remaining=$((deadline - SECONDS))
+    (( remaining > 0 )) || return 0
+    (( delay <= remaining )) || delay="$remaining"
+    sleep "$delay" 9>&- &
+    active_child=$!
+    wait "$active_child" || true
+    active_child=''
+}
+send_message() {
+    slack_call "$1" chat.postMessage --data-urlencode "channel=$GPU_WATCH_CHANNEL" --data-urlencode "text=$2"
+}
+
+declare -A candidates=()
+while (( SECONDS < deadline )); do
+    remaining=$((deadline - SECONDS))
+    limit=10; (( remaining >= limit )) || limit="$remaining"
+    if ! query_gpus "$limit"; then
+        log 'GPU query failed; availability is unknown. Confirmation reset.'
+        candidates=()
+        pause "$interval"
+        continue
+    fi
+    (( SECONDS < deadline )) || break
+    declare -A available=()
+    details=''
+    while IFS=, read -r uuid index used total extra; do
+        uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
+        used="${used//[[:space:]]/}"; total="${total//[[:space:]]/}"
+        [[ -z "$gpu" || "$gpu" == "$uuid" || "$gpu" == "$index" ]] || continue
+        [[ "$uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$index" =~ ^[0-9]+$ && "$used" =~ ^[0-9]{1,9}$ && "$total" =~ ^[0-9]{1,9}$ ]] || continue
+        (( 10#$used <= threshold && 10#$total > 0 )) || continue
+        available["$uuid"]=1
+        if [[ -n "${candidates[$uuid]:-}" ]]; then
+            details+="GPU $index ($uuid): $used / $total MiB used."$'\n'
+        fi
+    done <<< "$snapshot"
+    if [[ -n "$details" ]]; then
+        message="GPU available on $node"$'\n'"${details}Used VRAM <= $threshold MiB at two checks at least ${confirm}s apart. This is an observation, not a reservation."
+        remaining=$((deadline - SECONDS))
+        (( remaining > 0 )) || break
+        limit=10; (( remaining >= limit )) || limit="$remaining"
+        if send_message "$limit" "$message"; then
+            set_status "Notified: GPU available on $node at $(date -Is)."
+            log 'GPU availability notification sent. Monitoring finished.'
+            exit 0
+        fi
+        log 'Slack delivery failed; will recheck GPU availability before retrying.'
+    fi
+    candidates=()
+    for uuid in "${!available[@]}"; do candidates["$uuid"]=1; done
+    if (( ${#candidates[@]} )); then pause "$confirm"; else pause "$interval"; fi
+done
+
+message="GPU watch timed out on $node: no GPU availability notification was delivered within ${max_wait}s. Monitoring has stopped."
+if send_message 10 "$message"; then
+    set_status "Timed out on $node at $(date -Is); timeout notification sent."
+    log 'Maximum wait reached. Timeout notification sent; monitoring finished.'
+    exit 0
+fi
+set_status "Timed out on $node at $(date -Is); Slack delivery failed. Check the log."
+log 'Maximum wait reached. Timeout notification failed; monitoring finished.'
+exit 1
