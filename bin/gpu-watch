@@ -51,11 +51,14 @@ interval=600
 confirm=60
 max_wait=86400
 worker=0
-original_args=("$@")
+argument_count=$#
+# Bash 4.0-4.3 treats empty arrays as unset under nounset. The worker flag
+# keeps this array nonempty even when the user runs gpu-watch without options.
+worker_args=(--worker "$@")
 while (( $# )); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
-        status|stop) (( ${#original_args[@]} == 1 )) || die "'$1' does not accept options."; mode="$1"; shift ;;
+        status|stop) (( argument_count == 1 )) || die "'$1' does not accept options."; mode="$1"; shift ;;
         --foreground) [[ "$mode" == start ]] || die 'Choose only one execution mode.'; mode=foreground; shift ;;
         --worker) [[ "$mode" == start ]] || die 'Choose only one execution mode.'; worker=1; mode=foreground; shift ;;
         --gpu|--threshold|--interval|--confirm|--max-wait)
@@ -216,7 +219,8 @@ fi
 
 if [[ "$mode" == start ]]; then
     script="$(readlink -f "${BASH_SOURCE[0]}")" || die 'Cannot resolve executable path.'
-    nohup "$BASH" "$script" "${original_args[@]}" --worker </dev/null >> "$log_file" 2>&1 &
+    : >> "$log_file" || die "Cannot open watcher log: $log_file"
+    nohup "$BASH" "$script" "${worker_args[@]}" </dev/null >> "$log_file" 2>&1 &
     child=$!
     # Confirm initialization rather than reporting success based only on $!.
     for ((attempt=0; attempt<50; attempt++)); do
@@ -255,18 +259,20 @@ send_message() {
     slack_call "$1" chat.postMessage --data-urlencode "channel=$GPU_WATCH_CHANNEL" --data-urlencode "text=$2"
 }
 
-declare -A candidates=()
+# Delimited UUIDs avoid empty-array expansion on older Bash. Valid UUIDs
+# cannot contain '|', so membership checks still match the whole UUID.
+candidates=''
 while (( SECONDS < deadline )); do
     remaining=$((deadline - SECONDS))
     limit=10; (( remaining >= limit )) || limit="$remaining"
     if ! query_gpus "$limit"; then
         log 'GPU query failed; availability is unknown. Confirmation reset.'
-        candidates=()
+        candidates=''
         pause "$interval"
         continue
     fi
     (( SECONDS < deadline )) || break
-    declare -A available=()
+    available=''
     details=''
     while IFS=, read -r uuid index used total extra; do
         uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
@@ -274,8 +280,8 @@ while (( SECONDS < deadline )); do
         [[ -z "$gpu" || "$gpu" == "$uuid" || "$gpu" == "$index" ]] || continue
         [[ "$uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$index" =~ ^[0-9]+$ && "$used" =~ ^[0-9]{1,9}$ && "$total" =~ ^[0-9]{1,9}$ ]] || continue
         (( 10#$used <= threshold && 10#$total > 0 )) || continue
-        available["$uuid"]=1
-        if [[ -n "${candidates[$uuid]:-}" ]]; then
+        available+="|$uuid|"
+        if [[ "$candidates" == *"|$uuid|"* ]]; then
             details+="GPU $index ($uuid): $used / $total MiB used."$'\n'
         fi
     done <<< "$snapshot"
@@ -291,9 +297,8 @@ while (( SECONDS < deadline )); do
         fi
         log 'Slack delivery failed; will recheck GPU availability before retrying.'
     fi
-    candidates=()
-    for uuid in "${!available[@]}"; do candidates["$uuid"]=1; done
-    if (( ${#candidates[@]} )); then pause "$confirm"; else pause "$interval"; fi
+    candidates="$available"
+    if [[ -n "$candidates" ]]; then pause "$confirm"; else pause "$interval"; fi
 done
 
 message="GPU watch timed out on $node: no GPU availability notification was delivered within ${max_wait}s. Monitoring has stopped."

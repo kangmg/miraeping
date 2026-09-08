@@ -226,6 +226,18 @@ class GpuWatchTests(unittest.TestCase):
         self.assertIn("Not running", self.run_watch("status", env=env).stdout)
         self.assertEqual(self.messages(), [])
 
+    def test_default_no_argument_start_with_busy_gpus(self):
+        result = self.run_watch()
+        self.assertIn("Started GPU watcher", result.stdout)
+        self.assertIn("maximum wait: 86400s", result.stdout)
+        self.assertTrue((self.state / "monitor.log").is_file())
+        # Allow the first busy snapshot to reach the empty-candidate path.
+        time.sleep(0.3)
+        self.assertIn("Running on", self.run_watch("status").stdout)
+        self.assertNotIn("unbound variable", (self.state / "monitor.log").read_text())
+        self.assertIn("Stopped watcher", self.run_watch("stop").stdout)
+        self.assertEqual(self.messages(), [])
+
     def test_shared_home_uses_separate_node_state(self):
         self.run_watch("--max-wait", "1m")
         env = dict(self.env, MOCK_NODE="another-node")
