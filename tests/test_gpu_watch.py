@@ -12,9 +12,9 @@ import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "bin" / "gpu-watch"
-FREE = "GPU-aaa, 0, 50, 24000\nGPU-bbb, 1, 2000, 24000"
-BUSY = "GPU-aaa, 0, 2000, 24000\nGPU-bbb, 1, 2000, 24000"
-OTHER_FREE = "GPU-aaa, 0, 2000, 24000\nGPU-bbb, 1, 50, 24000"
+FREE = "GPU-aaa, 0, 50, 24000, NVIDIA RTX 6000 Ada\nGPU-bbb, 1, 2000, 24000, NVIDIA RTX A6000"
+BUSY = "GPU-aaa, 0, 2000, 24000, NVIDIA RTX 6000 Ada\nGPU-bbb, 1, 2000, 24000, NVIDIA RTX A6000"
+OTHER_FREE = "GPU-aaa, 0, 2000, 24000, NVIDIA RTX 6000 Ada\nGPU-bbb, 1, 50, 24000, NVIDIA RTX A6000"
 FAKE = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys, time
 root = pathlib.Path(os.environ["MOCK_ROOT"])
@@ -23,11 +23,13 @@ if name == "hostname":
     print(os.environ.get("MOCK_NODE", "gpu-test"))
     sys.exit(0)
 if name == "nvidia-smi":
+    assert "--query-gpu=uuid,index,memory.used,memory.total,name" in sys.argv
     counter = root / "queries"
     count = int(counter.read_text()) if counter.exists() else 0
     counter.write_text(str(count + 1))
     sequence = json.loads((root / "sequence.json").read_text())
-    value = sequence[min(count, len(sequence) - 1)]
+    position = count % len(sequence) if os.environ.get("MOCK_SEQUENCE_REPEAT") else min(count, len(sequence) - 1)
+    value = sequence[position]
     if value is None:
         sys.exit(1)
     if isinstance(value, dict):
@@ -138,24 +140,52 @@ class GpuWatchTests(unittest.TestCase):
         self.sequence(FREE)
         self.foreground()
         self.assertEqual(len(self.messages()), 1)
-        self.assertIn("GPU available on gpu-test", self.messages()[0])
-        self.assertIn("GPU 0 (GPU-aaa): 50 / 24000 MiB", self.messages()[0])
-        self.assertNotIn("GPU 1 (", self.messages()[0])
+        self.assertEqual(self.messages()[0], "\n".join([
+            "node: gpu-test", "```",
+            "+-----+--------------+--------+",
+            "| GPU | Name         | Avail. |",
+            "+-----+--------------+--------+",
+            "| 0   | RTX 6000 Ada |   ✓    |",
+            "| 1   | RTX A6000    |   ✗    |",
+            "+-----+--------------+--------+", "```",
+        ]))
         self.assertIn("Notified:", self.run_watch("status").stdout)
         self.assertFalse((self.state / "monitor.pid").exists())
 
     def test_gpu_filter_and_inclusive_threshold(self):
-        self.sequence(FREE, "GPU-aaa, 0, 0, 24000\nGPU-bbb, 1, 100, 24000")
+        self.sequence(FREE, "GPU-aaa, 0, 0, 24000, NVIDIA RTX 6000 Ada\nGPU-bbb, 1, 100, 24000, NVIDIA RTX A6000")
         self.foreground("--gpu", "GPU-bbb")
         self.assertEqual(len(self.messages()), 1)
-        self.assertIn("GPU 1 (GPU-bbb): 100", self.messages()[0])
-        self.assertNotIn("GPU 0 (", self.messages()[0])
+        self.assertIn("| 1   | RTX A6000    |   ✓    |", self.messages()[0])
+        self.assertNotIn("| 0   |", self.messages()[0])
 
     def test_different_free_gpus_do_not_confirm_each_other(self):
-        self.sequence(BUSY, FREE, OTHER_FREE, FREE, OTHER_FREE, FREE)
+        # Keep alternating for the entire watch, regardless of poll count.
+        self.env["MOCK_SEQUENCE_REPEAT"] = "1"
+        self.sequence(FREE, OTHER_FREE)
         self.foreground("--max-wait", "4s")
         self.assertEqual(len(self.messages()), 1)
-        self.assertIn("timed out", self.messages()[0])
+        self.assertIn("Monitoring stopped after", self.messages()[0])
+
+    def test_table_only_checks_confirmed_gpus_in_c_locale(self):
+        self.env["LC_ALL"] = "C"
+        self.sequence(BUSY, FREE, FREE.replace("2000", "50"))
+        self.foreground()
+        message = self.messages()[0]
+        self.assertIn("| 0   | RTX 6000 Ada |   ✓    |", message)
+        self.assertIn("| 1   | RTX A6000    |   ✗    |", message)
+        lines = message.splitlines()[2:-1]
+        self.assertEqual(len({len(line) for line in lines}), 1)
+
+    def test_timeout_table_has_no_extra_metrics(self):
+        self.foreground("--max-wait", "1s")
+        message = self.messages()[0]
+        self.assertTrue(message.startswith("node: gpu-test\n```\n"))
+        self.assertIn("| 0   | RTX 6000 Ada |   ✗    |", message)
+        self.assertIn("| 1   | RTX A6000    |   ✗    |", message)
+        self.assertTrue(message.endswith("```\nMonitoring stopped after 1 second."))
+        for unwanted in ("Mem", "MiB", "GiB", "UUID", "GPU-aaa", "runtime", "started", "Threshold"):
+            self.assertNotIn(unwanted, message)
 
     def test_query_failure_resets_confirmation(self):
         self.sequence(BUSY, FREE, None, FREE, FREE)
@@ -163,26 +193,26 @@ class GpuWatchTests(unittest.TestCase):
         self.assertIn("Confirmation reset", result.stdout)
         self.assertGreaterEqual(int((self.root / "queries").read_text()), 5)
         self.assertEqual(len(self.messages()), 1)
-        self.assertIn("GPU available", self.messages()[0])
+        self.assertIn("| 0   | RTX 6000 Ada |   ✓    |", self.messages()[0])
 
     def test_unavailable_memory_is_not_free(self):
-        self.sequence(BUSY, "GPU-aaa, 0, N/A, 24000")
+        self.sequence(BUSY, "GPU-aaa, 0, N/A, 24000, NVIDIA RTX 6000 Ada")
         self.foreground("--max-wait", "1s")
-        self.assertIn("timed out", self.messages()[0])
+        self.assertIn("Monitoring stopped after", self.messages()[0])
 
     def test_long_confirmation_is_capped_by_deadline(self):
         self.sequence(FREE)
         started = time.monotonic()
         self.foreground("--confirm", "60s", "--max-wait", "1s")
         self.assertLess(time.monotonic() - started, 4)
-        self.assertIn("timed out", self.messages()[0])
+        self.assertIn("Monitoring stopped after", self.messages()[0])
 
     def test_hung_gpu_query_is_capped_by_deadline(self):
         self.sequence(BUSY, {"sleep": 60, "output": FREE})
         started = time.monotonic()
         self.foreground("--max-wait", "1s")
         self.assertLess(time.monotonic() - started, 4)
-        self.assertIn("timed out", self.messages()[0])
+        self.assertIn("Monitoring stopped after", self.messages()[0])
 
     def test_slack_failure_rechecks_before_retry(self):
         self.sequence(BUSY, FREE, FREE, BUSY, FREE, FREE)
@@ -206,7 +236,7 @@ class GpuWatchTests(unittest.TestCase):
         result = self.foreground("--max-wait", "1s", check=False)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(len(self.messages()), 1)
-        self.assertIn("timed out", self.messages()[0])
+        self.assertIn("Monitoring stopped after", self.messages()[0])
         self.assertLess(time.monotonic() - started, 14)
         self.assertFalse((self.state / "monitor.pid").exists())
 

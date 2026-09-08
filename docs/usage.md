@@ -394,8 +394,11 @@ Startup checks can take up to about 20 seconds if external commands stall.
 - When a candidate is available, check again after **1 minute**. The GPU UUID
   must match across both observations. This does not prove uninterrupted
   availability between observations and does not reserve a GPU.
-- Send one English Slack DM with the hostname, GPU index, UUID, and used/total
-  VRAM, then exit after a successful delivery.
+- Send one Slack DM with the hostname and a boxed `GPU | Name | Avail.` table,
+  then exit after a successful delivery. `✓` means the GPU passed both VRAM
+  checks; `✗` means availability has not been confirmed (including busy,
+  pending confirmation, or unavailable memory data). Memory values, UUIDs,
+  and timing details are not displayed. With `--gpu`, show only that GPU.
 - Stop monitoring after **24 hours** by default. Attempt one final timeout DM,
   bounded to **10 additional seconds** (plus at most 1 second to force-stop a
   stuck external command), then exit even if Slack is unreachable. The time
@@ -404,15 +407,23 @@ Startup checks can take up to about 20 seconds if external commands stall.
   never count as available. Failed availability notifications trigger another
   GPU check before retrying, within the monitoring deadline.
 
-Example notifications:
+Example availability notification:
 
+node: g01
 ```text
-GPU available on gpu-node-01
-GPU 0 (GPU-...): 50 / 24576 MiB used.
-Used VRAM <= 100 MiB at two checks at least 60s apart. This is an observation, not a reservation.
-
-GPU watch timed out on gpu-node-01: no GPU availability notification was delivered within 86400s. Monitoring has stopped.
++-----+--------------+--------+
+| GPU | Name         | Avail. |
++-----+--------------+--------+
+| 0   | RTX 6000 Ada |   ✓    |
+| 1   | RTX A6000    |   ✗    |
+| 2   | RTX A6000    |   ✓    |
+| 3   | RTX A6000    |   ✗    |
++-----+--------------+--------+
 ```
+
+Timeout notifications use the last observed GPU list and add only
+`Monitoring stopped after 24 hours.` below the table (adjusted for
+`--max-wait`). Failed GPU queries clear all availability check marks.
 
 ### Options and state
 

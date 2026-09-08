@@ -184,7 +184,7 @@ run_bounded() {
     return "$rc"
 }
 query_gpus() {
-    run_bounded "$1" nvidia-smi --query-gpu=uuid,index,memory.used,memory.total --format=csv,noheader,nounits || return 1
+    run_bounded "$1" nvidia-smi --query-gpu=uuid,index,memory.used,memory.total,name --format=csv,noheader,nounits || return 1
     [[ -n "$response" ]] || return 1
     snapshot="$response"
 }
@@ -201,7 +201,7 @@ slack_call() {
 if (( ! worker )); then
     query_gpus 10 || die 'Cannot query GPU memory with nvidia-smi.'
     matched=0
-    while IFS=, read -r uuid index used total extra; do
+    while IFS=, read -r uuid index used total name extra; do
         uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
         used="${used//[[:space:]]/}"; total="${total//[[:space:]]/}"
         if [[ -z "$gpu" || "$gpu" == "$uuid" || "$gpu" == "$index" ]]; then
@@ -214,7 +214,8 @@ if (( ! worker )); then
     slack_call 10 conversations.open --data-urlencode "users=$SLACK_USER_ID" || die 'Cannot open Slack DM. Check credentials, network access, and Slack permissions.'
     GPU_WATCH_CHANNEL="$(printf '%s' "$response" | sed -n 's/.*"channel"[[:space:]]*:[[:space:]]*{[^}]*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
     [[ "$GPU_WATCH_CHANNEL" =~ ^D[A-Z0-9]+$ ]] || die 'Slack did not return a DM channel ID.'
-    export GPU_WATCH_CHANNEL
+    GPU_WATCH_INVENTORY="$snapshot"
+    export GPU_WATCH_CHANNEL GPU_WATCH_INVENTORY
 fi
 
 if [[ "$mode" == start ]]; then
@@ -248,33 +249,75 @@ log "Monitoring started: GPU=${gpu:-any}, threshold=${threshold} MiB, interval=$
 
 pause() {
     local delay="$1" remaining=$((deadline - SECONDS))
-    (( remaining > 0 )) || return 0
-    (( delay <= remaining )) || delay="$remaining"
+    local reached_deadline=0
+    (( remaining > 0 )) || return 1
+    if (( delay >= remaining )); then
+        delay="$remaining"
+        reached_deadline=1
+    fi
     sleep "$delay" 9>&- &
     active_child=$!
     wait "$active_child" || true
     active_child=''
+    # A confirmation shortened by the deadline is never a completed wait,
+    # even if the shell's integer SECONDS counter has not ticked over yet.
+    return "$reached_deadline"
 }
 send_message() {
     slack_call "$1" chat.postMessage --data-urlencode "channel=$GPU_WATCH_CHANNEL" --data-urlencode "text=$2"
 }
 
+# Match the compact /gpu table. Print symbols without width formatting so
+# their UTF-8 byte length cannot shift the borders under the C locale.
+format_gpu_table() {
+    local rows="$1" ready="$2" uuid index used total name extra symbol
+    local border='+-----+--------------+--------+'
+    printf 'node: %s\n```\n%s\n' "$node" "$border"
+    printf '| GPU | Name         | Avail. |\n%s\n' "$border"
+    while IFS=, read -r uuid index used total name extra; do
+        uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
+        [[ "$uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$index" =~ ^[0-9]+$ ]] || continue
+        [[ -z "$gpu" || "$gpu" == "$uuid" || "$gpu" == "$index" ]] || continue
+        name="${name#"${name%%[![:space:]]*}"}"
+        name="${name%"${name##*[![:space:]]}"}"
+        name="${name#NVIDIA }"
+        name="${name//\`/}"; name="${name//|/}"
+        name="${name:-Unknown}"
+        symbol='✗'
+        [[ "$ready" != *"|$uuid|"* ]] || symbol='✓'
+        printf '| %-3s | %-12.12s |   %s    |\n' "$index" "$name" "$symbol"
+    done <<< "$rows"
+    printf '%s\n```' "$border"
+}
+
+format_wait() {
+    local amount="$max_wait" unit=second
+    if (( max_wait % 3600 == 0 )); then amount=$((max_wait / 3600)); unit=hour
+    elif (( max_wait % 60 == 0 )); then amount=$((max_wait / 60)); unit=minute; fi
+    (( amount == 1 )) || unit+=s
+    printf '%s %s' "$amount" "$unit"
+}
+
 # Delimited UUIDs avoid empty-array expansion on older Bash. Valid UUIDs
 # cannot contain '|', so membership checks still match the whole UUID.
 candidates=''
+confirmed=''
+table_snapshot="${GPU_WATCH_INVENTORY:-}"
 while (( SECONDS < deadline )); do
     remaining=$((deadline - SECONDS))
     limit=10; (( remaining >= limit )) || limit="$remaining"
     if ! query_gpus "$limit"; then
         log 'GPU query failed; availability is unknown. Confirmation reset.'
         candidates=''
-        pause "$interval"
+        confirmed=''
+        pause "$interval" || break
         continue
     fi
     (( SECONDS < deadline )) || break
     available=''
-    details=''
-    while IFS=, read -r uuid index used total extra; do
+    confirmed=''
+    table_snapshot="$snapshot"
+    while IFS=, read -r uuid index used total name extra; do
         uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
         used="${used//[[:space:]]/}"; total="${total//[[:space:]]/}"
         [[ -z "$gpu" || "$gpu" == "$uuid" || "$gpu" == "$index" ]] || continue
@@ -282,11 +325,11 @@ while (( SECONDS < deadline )); do
         (( 10#$used <= threshold && 10#$total > 0 )) || continue
         available+="|$uuid|"
         if [[ "$candidates" == *"|$uuid|"* ]]; then
-            details+="GPU $index ($uuid): $used / $total MiB used."$'\n'
+            confirmed+="|$uuid|"
         fi
     done <<< "$snapshot"
-    if [[ -n "$details" ]]; then
-        message="GPU available on $node"$'\n'"${details}Used VRAM <= $threshold MiB at two checks at least ${confirm}s apart. This is an observation, not a reservation."
+    if [[ -n "$confirmed" ]]; then
+        message="$(format_gpu_table "$table_snapshot" "$confirmed")"
         remaining=$((deadline - SECONDS))
         (( remaining > 0 )) || break
         limit=10; (( remaining >= limit )) || limit="$remaining"
@@ -298,10 +341,14 @@ while (( SECONDS < deadline )); do
         log 'Slack delivery failed; will recheck GPU availability before retrying.'
     fi
     candidates="$available"
-    if [[ -n "$candidates" ]]; then pause "$confirm"; else pause "$interval"; fi
+    if [[ -n "$candidates" ]]; then
+        pause "$confirm" || break
+    else
+        pause "$interval" || break
+    fi
 done
 
-message="GPU watch timed out on $node: no GPU availability notification was delivered within ${max_wait}s. Monitoring has stopped."
+message="$(format_gpu_table "$table_snapshot" "$confirmed")"$'\n'"Monitoring stopped after $(format_wait)."
 if send_message 10 "$message"; then
     set_status "Timed out on $node at $(date -Is); timeout notification sent."
     log 'Maximum wait reached. Timeout notification sent; monitoring finished.'
