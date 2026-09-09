@@ -1,4 +1,4 @@
 interface:
   display_name: "Slack Notify"
-  short_description: "Check and add Slack alerts to GPU, SGE, and Python jobs"
-  default_prompt: "Use $slack-notify to check my notification setup, then add Slack alerts and local logging to my job."
+  short_description: "Minimal Slack alerts for scheduler, Python, and GPU jobs"
+  default_prompt: "Use $slack-notify to check my setup and add a concise completion or failure alert with the calculation path."

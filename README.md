@@ -76,8 +76,8 @@ for options and operational details.
 
 ## User Notification Doctor and Agent Skill
 
-The `slack-notify` skill covers user-side SGE/Bash notifications, the Python
-package, local logging, and `gpu-watch`. It starts with an automatic doctor
+The `slack-notify` skill covers user-side scheduler/Bash notifications (Slurm or SGE), the Python
+package, sparse milestone alerts, and `gpu-watch`. It starts with an automatic doctor
 check and excludes Slack command server administration.
 
 ```bash
@@ -91,14 +91,14 @@ miraeping-doctor
 ```
 
 Doctor runs in Bash 4+ with standard Unix tools and curl; neither Python nor jq
-is required. Bash/helper/curl and SGE checks run by default. Optional Python
+is required. Bash/helper/curl and scheduler-tool checks run by default. Optional Python
 checks use active venv/conda, an existing project `.venv` (including uv), or Python
 on PATH; missing Python or miraeping does not block Bash checks. It also checks
 GPU prerequisites when available, without printing secrets. A configured bot
 token automatically triggers Slack authentication and reported DM-scope checks.
 It does not install software, source the helper, start a watcher, or send a DM;
 actual recipient/delivery checks remain separate. Use `miraeping-doctor --help`
-for usage. There are no mode or online switches.
+for usage.
 
 `setup_skill.sh` installs independent copies of the complete
 [skill folder](skills/slack-notify/SKILL.md) into both

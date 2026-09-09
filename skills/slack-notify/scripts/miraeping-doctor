@@ -7,12 +7,12 @@ umask 077
 usage() {
     printf '%s\n' 'Usage: miraeping-doctor [-h|--help]' '' \
         'Automatically check Bash/helper/curl, credentials, Slack authentication,' \
-        'SGE tools, GPU prerequisites, and optional Python/miraeping.' \
+        'Scheduler tools, GPU prerequisites, and optional Python/miraeping.' \
         'Python is optional: active venv/conda, project .venv (uv), then PATH.' \
         'No Python means only the Python check is skipped. No jq is required.' \
         'A configured bot token triggers curl auth.test automatically (10s limit).' \
         'No credentials are printed, no helper is sourced, and no DM is sent.' \
-        'No mode or online switches. Activate the job environment first.' \
+        'Activate the job environment first if applicable.' \
         'Exit: 0 = no failures and a ready path; 1 = setup failure; 2 = bad arguments.'
 }
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
@@ -235,9 +235,9 @@ info 'miraeping doctor: Bash-first; Python is optional.'
 check_bash
 check_python
 check_gpu
-for command in qsub qstat; do
+for command in sbatch squeue qsub qstat; do
     if has "$command"; then ok "$command found"
-    else info "$command not found here; verify on SGE before submission."; fi
+    else info "$command not found here; only needed if your scheduler uses it."; fi
 done
 for workflow in bash python gpu; do
     case "$workflow" in bash) ready=$bash_ready ;; python) ready=$python_ready ;; gpu) ready=$gpu_ready ;; esac
