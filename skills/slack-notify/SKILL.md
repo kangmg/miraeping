@@ -12,16 +12,14 @@ Use `miraeping` for user notifications and `gpu-watch` for one-shot GPU availabi
 Identify the **execution host and job environment**, then run the bundled diagnostic there before adding or starting notifications:
 
 ```bash
-bash "<this-skill-directory>/scripts/miraeping-doctor" --mode bash
-bash "<this-skill-directory>/scripts/miraeping-doctor" --mode python --python /path/to/job/env/bin/python
-bash "<this-skill-directory>/scripts/miraeping-doctor" --mode gpu
+bash "<this-skill-directory>/scripts/miraeping-doctor"
 ```
 
-Choose the relevant mode, not `all` by default. A CPU SGE job does not need a GPU driver; a Bash job does not need the Python package. The script can run before miraeping is installed. If the target cannot be reached, continue preparing the code and provide the command to run there; do not report a local workstation check as cluster readiness.
+Doctor runs in Bash, with no Python or jq dependency. Do not install Python just to run it. Activate the job environment first if applicable. It checks Bash/helper/curl and SGE tools by default. Python is optional: select active venv/conda, an existing project `.venv` (including uv), or Python on PATH; missing/broken Python or a missing package does not block Bash checks; GPU checks run when `nvidia-smi` and `gpu-watch` are present. No mode selection is needed. A CPU job does not need a GPU driver; a Bash job does not need the Python package. The script can run before miraeping is installed. If the target cannot be reached, continue preparing the code and provide the command to run there; do not report a local workstation check as cluster readiness.
 
-Doctor prints presence, source, and format results without exposing values. Default checks are offline. For online setup verification, add `--online`: it only calls Slack `auth.test` and checks reported DM scopes, never opens a DM or sends a test message. Distinguish local readiness, accepted credentials, and actual delivery. Missing credentials must be configured by the user on the target, not pasted into chat or committed to scripts. Installation does not itself authorize sending a test message or submitting a job.
+Doctor prints presence, source, and format results without exposing values. With a plausible bot token, it automatically calls Slack `auth.test` and checks reported DM scopes, never opens a DM or sends a test message. Distinguish local readiness, accepted credentials, and actual delivery. Missing credentials must be configured by the user on the target, not pasted into chat or committed to scripts. Installation does not itself authorize sending a test message or submitting a job.
 
-On failure, fix only prerequisites relevant to the requested path, then rerun that mode in the same environment. If credentials are missing, continue independent script work but do not launch the notifier. Read [setup and diagnostics](references/setup.md) for dependency names, installation, and credential precedence.
+On failure, inspect the per-workflow readiness summary, fix prerequisites relevant to the requested path, then rerun doctor in the same environment. Do not install unused integrations just to remove warnings. If the requested path's credentials are missing, continue independent script work but do not launch the notifier. Read [setup and diagnostics](references/setup.md) for dependency names, installation, and credential precedence.
 
 ## Choose the integration
 

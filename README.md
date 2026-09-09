@@ -77,25 +77,35 @@ for options and operational details.
 ## User Notification Doctor and Agent Skill
 
 The `slack-notify` skill covers user-side SGE/Bash notifications, the Python
-package, local logging, and `gpu-watch`. It starts with a mode-specific doctor
+package, local logging, and `gpu-watch`. It starts with an automatic doctor
 check and excludes Slack command server administration.
 
 ```bash
+bash setup_skill.sh
+# Activate the job's conda/venv environment first, if applicable.
+bash skills/slack-notify/scripts/miraeping-doctor
+
+# Optional standalone command; ~/.local/bin must be on PATH.
 install -Dm755 skills/slack-notify/scripts/miraeping-doctor ~/.local/bin/miraeping-doctor
-miraeping-doctor --mode bash
-miraeping-doctor --mode python --python /path/to/job/env/bin/python
-miraeping-doctor --mode gpu --online
+miraeping-doctor
 ```
 
-Doctor checks credential presence/source, relevant commands, and the selected
-Python import without printing secrets. It does not install software, source
-the helper, start a watcher, or send a DM. `--online` only checks Slack
-authentication and reported DM scopes; actual recipient/delivery checks remain
-separate. Use `miraeping-doctor --help` for options and exit codes.
+Doctor runs in Bash 4+ with standard Unix tools and curl; neither Python nor jq
+is required. Bash/helper/curl and SGE checks run by default. Optional Python
+checks use active venv/conda, an existing project `.venv` (including uv), or Python
+on PATH; missing Python or miraeping does not block Bash checks. It also checks
+GPU prerequisites when available, without printing secrets. A configured bot
+token automatically triggers Slack authentication and reported DM-scope checks.
+It does not install software, source the helper, start a watcher, or send a DM;
+actual recipient/delivery checks remain separate. Use `miraeping-doctor --help`
+for usage. There are no mode or online switches.
 
-Install the complete [skill folder](skills/slack-notify/SKILL.md), including
-`scripts`, `references`, and `agents`, into your agent's skills directory. For
-Codex, the default is `~/.codex/skills/slack-notify` (or `$CODEX_HOME/skills/slack-notify`).
+`setup_skill.sh` installs independent copies of the complete
+[skill folder](skills/slack-notify/SKILL.md) into both
+`~/.claude/skills/slack-notify` and `~/.codex/skills/slack-notify`
+(or `$CODEX_HOME/skills/slack-notify`), using `cp -rL`, not symlinks.
+Previous installations are preserved in `skill-backups` beside each agent's
+`skills` directory. Rerun the installer after updating the repository.
 Invoke it with `$slack-notify` when preparing a job or adding notifications.
 The Python notification package is `miraeping`; no server extra is required.
 

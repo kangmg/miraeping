@@ -1,6 +1,6 @@
 # Python notifications and local logging
 
-Run doctor with `--mode python --python /path/to/job/env/bin/python`. The package and import name are both `miraeping`; notification code uses only the Python standard library. Avoid installing dependencies for a Slack server into a computation environment.
+Activate the job's conda/venv environment, then run the bundled doctor with `bash`. It automatically selects that environment (or an existing project `.venv`, including uv) and reports the selected interpreter and package API availability. The package and import name are both `miraeping`; notification code uses only the Python standard library. Avoid installing dependencies for a Slack server into a computation environment.
 
 ## Public API
 
@@ -58,6 +58,6 @@ else:
 
 Keep heavy file reads, mutable shared state, and calls into non-thread-safe simulation objects out of the callback. For log tails, read a bounded amount and handle missing files/partial writes; do not reread multi-gigabyte logs every interval. Do not attach an automatic Slack handler to every log record unless specifically requested.
 
-The Python API swallows many notification errors, and its transport does not reliably raise for Slack `ok: false`. Do not use `miraeping.send(...)` returning normally as proof of delivery. Doctor's offline/online checks also do not send a test DM. If the user requests a real delivery test, send one concise test using their chosen path and verify the observed result; do not retry indefinitely or mask a failed computation.
+The Python API swallows many notification errors, and its transport does not reliably raise for Slack `ok: false`. Do not use `miraeping.send(...)` returning normally as proof of delivery. Doctor's automatic authentication check also does not send a test DM. If the user requests a real delivery test, send one concise test using their chosen path and verify the observed result; do not retry indefinitely or mask a failed computation.
 
 For Python inside SGE, preserve job environment activation and choose one owner for final notifications (Python or the wrapper) to avoid duplicate DMs. MPI/multiprocessing workers should not each create a monitor.

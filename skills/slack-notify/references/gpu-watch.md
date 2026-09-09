@@ -1,6 +1,6 @@
 # GPU availability watcher
 
-Run doctor with `--mode gpu` on the actual GPU node. It must see `gpu-watch`, `nvidia-smi`, and exported `SLACK_BOT_TOKEN` / `SLACK_USER_ID`; a credential file alone is insufficient.
+Run the bundled doctor with `bash` on the actual GPU node; GPU checks are automatic when `gpu-watch` and `nvidia-smi` are present. It must see exported `SLACK_BOT_TOKEN` / `SLACK_USER_ID`; a credential file alone is insufficient. GPU checks skipped on a CPU/login host do not establish GPU-node readiness.
 
 ```bash
 gpu-watch

@@ -1,6 +1,6 @@
 # Bash, SGE, and logging
 
-Run doctor in Bash mode first. Use the user's existing SGE script as the starting point: retain queue, resource requests, MPI launcher, module/conda activation, and working-directory setup. Notification changes must not quietly change the computation.
+Run the bundled doctor with `bash` first; it automatically checks Bash, the installed helper, curl, credentials, and SGE tools; Python is checked only when available. Use the user's existing SGE script as the starting point: retain queue, resource requests, MPI launcher, module/conda activation, and working-directory setup. Notification changes must not quietly change the computation.
 
 ## Actual helper API
 
