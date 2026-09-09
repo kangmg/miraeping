@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# Read-only user-side diagnostics; also runs before miraeping is installed.
+set +x
+set -uo pipefail
+umask 077
+
+usage() {
+    cat <<'EOF'
+Usage: miraeping-doctor [--mode bash|python|gpu|all] [options]
+
+Check user-side miraeping prerequisites without sending a Slack message.
+
+  --mode MODE       Check only the selected workflow (default: bash)
+  --python PATH     Python interpreter used by the job (default: python3)
+  --helper PATH     Bash helper (default: ~/.miraeping/miraeping)
+  --online          Also call Slack auth.test and check reported DM scopes
+  -h, --help        Show this help
+
+Credentials: Bash prefers ~/.miraeping/credentials; Python prefers environment
+variables; gpu-watch uses exported environment variables only. Values are
+never printed. No configuration is changed, no DM is opened, and no job or
+watcher is started. Local checks do not prove token validity or DM delivery.
+Exit codes: 0 = selected local checks passed (warnings may remain),
+            1 = prerequisite/check failed, 2 = invalid command line.
+
+Examples:
+  miraeping-doctor --mode bash
+  miraeping-doctor --mode python --python /path/to/venv/bin/python
+  miraeping-doctor --mode gpu --online
+EOF
+}
+
+mode=bash
+python_bin=python3
+helper="${HOME:?HOME is required}/.miraeping/miraeping"
+online=0
+while (( $# )); do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --online) online=1; shift ;;
+        --mode|--python|--helper)
+            (( $# >= 2 )) || { printf 'Missing value for %s\n' "$1" >&2; exit 2; }
+            case "$1" in --mode) mode="$2" ;; --python) python_bin="$2" ;; --helper) helper="$2" ;; esac
+            shift 2 ;;
+        *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
+    esac
+done
+case "$mode" in bash|python|gpu|all) ;; *) printf 'Invalid mode: %s\n' "$mode" >&2; exit 2 ;; esac
+(( BASH_VERSINFO[0] >= 4 )) || { printf '[FAIL] Bash 4+ is required.\n'; exit 1; }
+failures=0
+warnings=0
+ok() { printf '[OK] %s\n' "$*"; }
+fail() { printf '[FAIL] %s\n' "$*"; failures=$((failures + 1)); }
+warn() { printf '[WARN] %s\n' "$*"; warnings=$((warnings + 1)); }
+require_command() {
+    if command -v "$1" >/dev/null 2>&1; then ok "$1 found"; else fail "Missing command: $1"; return 1; fi
+}
+trim() {
+    local text="$1"
+    text="${text#"${text%%[![:space:]]*}"}"
+    text="${text%"${text##*[![:space:]]}"}"
+    printf '%s' "$text"
+}
+
+check_credentials() {
+    local workflow="$1" key value file="${HOME}/.miraeping/credentials"
+    local token="${SLACK_BOT_TOKEN:-}" user_id="${SLACK_USER_ID:-}"
+    local token_set="${SLACK_BOT_TOKEN+x}" user_set="${SLACK_USER_ID+x}"
+    local token_source=environment user_source=environment
+    local permissions response scopes scope headers auth_error
+    if [[ "$workflow" != gpu && -e "$file" ]]; then
+        if [[ ! -r "$file" ]]; then
+            warn 'Credentials file is not readable; checking environment fallback.'
+        else
+            permissions="$(stat -c %a "$file" 2>/dev/null || true)"
+            if [[ "$permissions" =~ ^[0-7]{3,4}$ ]] && (( (8#$permissions & 077) != 0 )); then
+                warn 'Credentials file is accessible to other users; use chmod 600 on ~/.miraeping/credentials.'
+            fi
+            while IFS='=' read -r key value || [[ -n "$key" ]]; do
+                key="${key%$'\r'}"; value="${value%$'\r'}"
+                if [[ "$workflow" == python ]]; then key="$(trim "$key")"; value="$(trim "$value")"; fi
+                [[ -n "$value" ]] || continue
+                case "$key" in
+                    SLACK_BOT_TOKEN)
+                        if [[ "$workflow" == bash || -z "$token_set" ]]; then
+                            token="$value"; token_set=x; token_source='credentials file'
+                        fi ;;
+                    SLACK_USER_ID)
+                        if [[ "$workflow" == bash || -z "$user_set" ]]; then
+                            user_id="$value"; user_set=x; user_source='credentials file'
+                        fi ;;
+                esac
+            done < "$file"
+        fi
+    fi
+    if [[ "$token" =~ ^xoxb-[A-Za-z0-9-]+$ ]]; then
+        ok "SLACK_BOT_TOKEN present; source: $token_source (format only)"
+    else
+        fail "SLACK_BOT_TOKEN missing or malformed; effective source: $token_source"
+    fi
+    if [[ "$user_id" =~ ^[UW][A-Z0-9]{8,}$ ]]; then
+        ok "SLACK_USER_ID present; source: $user_source (format only)"
+    else
+        fail "SLACK_USER_ID missing or malformed; effective source: $user_source"
+    fi
+    (( online )) || return 0
+    [[ "$token" =~ ^xoxb-[A-Za-z0-9-]+$ ]] || return 0
+    require_command curl || return 0
+    headers="$(mktemp)" || { fail 'Could not create temporary response-header file.'; return 0; }
+    # Token is stdin configuration, not argv, log output, or a persisted file.
+    response="$(curl --silent --show-error --fail --connect-timeout 5 --max-time 10 \
+        --config - --dump-header "$headers" --request POST --data '' \
+        https://slack.com/api/auth.test 2>/dev/null \
+        <<< "header = \"Authorization: Bearer $token\"")"
+    if (( $? != 0 )); then
+        fail 'Slack auth.test could not complete (network, HTTP, or timeout error).'
+    elif [[ "$response" =~ \"ok\"[[:space:]]*:[[:space:]]*true ]]; then
+        ok 'Slack auth.test succeeded; token is accepted.'
+        scopes="$(awk 'tolower($1) == "x-oauth-scopes:" {sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[\r[:space:]]/, ""); print}' "$headers" | tail -n 1)"
+        if [[ -z "$scopes" ]]; then
+            warn 'Slack did not report scopes; DM permissions are unverified.'
+        else
+            for scope in im:write chat:write; do
+                case ",$scopes," in
+                    *,"$scope",*) ok "DM scope present: $scope" ;;
+                    *) fail "Missing DM scope: $scope; ask the existing bot administrator." ;;
+                esac
+            done
+        fi
+    else
+        auth_error="$(printf '%s' "$response" | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([a-z_]*\)".*/\1/p')"
+        case "$auth_error" in
+            invalid_auth|token_revoked|token_expired|not_authed|account_inactive|ratelimited)
+                fail "Slack auth.test rejected the token: $auth_error" ;;
+            *) fail 'Slack auth.test did not confirm authentication.' ;;
+        esac
+    fi
+    rm -f "$headers"
+    printf '[INFO] Recipient membership and actual DM delivery remain unverified; no message was sent.\n'
+}
+
+check_bash() {
+    local function_name functions_ok=1
+    require_command curl || true
+    if [[ ! -r "$helper" ]]; then
+        fail "Bash helper not found: $helper; install miraeping.sh or run setup.sh."
+    elif ! bash -n "$helper" 2>/dev/null; then
+        fail 'Bash helper has syntax errors.'
+    else
+        for function_name in miraeping_send miraeping_monitor miraeping_stop; do
+            if ! grep -Eq "^[[:space:]]*$function_name[[:space:]]*\(\)" "$helper"; then
+                fail "Bash helper is missing the expected $function_name definition."
+                functions_ok=0
+            fi
+        done
+        (( ! functions_ok )) || ok "Bash helper readable, API definitions present, and syntax valid: $helper"
+        printf '[INFO] Source the helper explicitly in each submission script; doctor does not source it.\n'
+    fi
+    local command
+    for command in qsub qstat; do
+        command -v "$command" >/dev/null 2>&1 && ok "$command found" || warn "$command not found here; check the SGE environment before submission."
+    done
+}
+
+check_python() {
+    require_command "$python_bin" || return 0
+    require_command timeout || return 0
+    if ! timeout --kill-after=1 10 "$python_bin" - 2>/dev/null <<'PY'
+import sys
+if sys.version_info < (3, 7):
+    print('[FAIL] Python 3.7+ is required.')
+    sys.exit(1)
+print('[OK] Python {}: {}'.format(sys.version.split()[0], sys.executable))
+try:
+    import miraeping
+    if not all(callable(getattr(miraeping, name, None)) for name in ('send', 'Job', 'Monitor')):
+        raise ImportError('incomplete miraeping API')
+except Exception:
+    print('[FAIL] Cannot import the miraeping notification API in this interpreter.')
+    sys.exit(1)
+print('[OK] miraeping version: {}'.format(getattr(miraeping, '__version__', 'unknown')))
+print('[INFO] Imported from: {}'.format(getattr(miraeping, '__file__', 'unknown')))
+print('[INFO] Notification package: miraeping; no third-party runtime dependencies in the maintained user API.')
+PY
+    then
+        fail 'Python API check failed; install miraeping in the selected job environment (python -m pip install miraeping, or uv pip install --python PATH miraeping).'
+    fi
+}
+
+check_gpu() {
+    local command ready=1 output uuid index used total count=0 invalid=0
+    for command in gpu-watch nvidia-smi curl nohup timeout flock; do
+        require_command "$command" || ready=0
+    done
+    [[ -d /proc/self ]] || { fail 'gpu-watch requires Linux /proc.'; ready=0; }
+    (( ready )) || return 0
+    if ! output="$(timeout --kill-after=1 10 nvidia-smi --query-gpu=uuid,index,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null)"; then
+        fail 'nvidia-smi query failed; run doctor on the intended GPU node.'
+        return 0
+    fi
+    while IFS=, read -r uuid index used total; do
+        [[ -n "$uuid" ]] || continue
+        uuid="${uuid//[[:space:]]/}"; index="${index//[[:space:]]/}"
+        used="${used//[[:space:]]/}"; total="${total//[[:space:]]/}"
+        if [[ "$uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$index" =~ ^[0-9]+$ && "$used" =~ ^[0-9]{1,9}$ && "$total" =~ ^[0-9]{1,9}$ ]] && (( 10#$total > 0 )); then
+            count=$((count + 1))
+        else invalid=$((invalid + 1)); fi
+    done <<< "$output"
+    (( count > 0 )) && ok "Readable GPU VRAM data: $count GPU(s)" || fail 'No readable GPU VRAM data.'
+    (( invalid == 0 )) || fail 'Some GPUs have unsupported VRAM data; choose a supported --gpu explicitly.'
+}
+
+printf 'miraeping doctor — user notifications\n'
+for workflow in bash python gpu; do
+    [[ "$mode" == all || "$mode" == "$workflow" ]] || continue
+    printf '\n[%s]\n' "$workflow"
+    check_credentials "$workflow"
+    case "$workflow" in bash) check_bash ;; python) check_python ;; gpu) check_gpu ;; esac
+done
+printf '\nResult: %s failure(s), %s warning(s).\n' "$failures" "$warnings"
+(( online )) || printf 'Offline check only; use --online to validate Slack authentication without sending a DM.\n'
+(( failures == 0 ))

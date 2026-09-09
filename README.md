@@ -74,6 +74,31 @@ it attempts a timeout DM and exits. The final timeout DM has a separate
 All messages and help are in English. See the [GPU watcher guide](docs/usage.md#feature-3---gpu-availability-watcher)
 for options and operational details.
 
+## User Notification Doctor and Agent Skill
+
+The `slack-notify` skill covers user-side SGE/Bash notifications, the Python
+package, local logging, and `gpu-watch`. It starts with a mode-specific doctor
+check and excludes Slack command server administration.
+
+```bash
+install -Dm755 skills/slack-notify/scripts/miraeping-doctor ~/.local/bin/miraeping-doctor
+miraeping-doctor --mode bash
+miraeping-doctor --mode python --python /path/to/job/env/bin/python
+miraeping-doctor --mode gpu --online
+```
+
+Doctor checks credential presence/source, relevant commands, and the selected
+Python import without printing secrets. It does not install software, source
+the helper, start a watcher, or send a DM. `--online` only checks Slack
+authentication and reported DM scopes; actual recipient/delivery checks remain
+separate. Use `miraeping-doctor --help` for options and exit codes.
+
+Install the complete [skill folder](skills/slack-notify/SKILL.md), including
+`scripts`, `references`, and `agents`, into your agent's skills directory. For
+Codex, the default is `~/.codex/skills/slack-notify` (or `$CODEX_HOME/skills/slack-notify`).
+Invoke it with `$slack-notify` when preparing a job or adding notifications.
+The Python notification package is `miraeping`; no server extra is required.
+
 ## Slack Command Server (Admin)
 
 Uses **Socket Mode** — outbound WebSocket to Slack, no public IP or port forwarding needed.

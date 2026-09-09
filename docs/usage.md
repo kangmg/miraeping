@@ -175,7 +175,8 @@ The examples below keep the original SGE script context and mark only the lines 
 
 #### Periodic status with `miraeping_monitor`
 
-Sends the last line of OSZICAR every 5 minutes. Use `miraeping_stop` at the end to stop the background monitor and send the final message.
+Sends the last line of OSZICAR every 5 minutes. Send the final message explicitly
+with `miraeping_send`, then use `miraeping_stop` to stop the background monitor.
 
 ```diff
  #!/bin/bash
@@ -199,7 +200,8 @@ Sends the last line of OSZICAR every 5 minutes. Use `miraeping_stop` at the end 
 + miraeping_monitor "tail -n 1 OSZICAR" 300
  mpirun -machinefile "$TMPDIR/machines" -n "$NSLOTS" vasp_std
  rc=$?
-+ miraeping_stop "VASP finished (exit $rc): $PWD"
++ miraeping_send "VASP finished (exit $rc): $PWD" || true
++ MIRAEPING_LAST_RC="$rc" miraeping_stop || true
  exit "$rc"
 ```
 
